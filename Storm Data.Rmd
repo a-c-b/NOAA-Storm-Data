@@ -1,0 +1,198 @@
+---
+title: "Population Health and Economic Consequences from NOAA Storm Data, 1950-2011"
+output: html_document
+---
+
+
+## Synopsis
+
+The basic goal of this assignment is to explore the NOAA Storm Database and answer two questions concerning severe weather events: 
+
+1. Across the United States, which types of events are most harmful with respect to population health?
+2. Across the United States, which types of events have the greatest economic consequences?
+
+The events in the database start in the year 1950 and end in November 2011. In the earlier years of the database there are generally fewer events recorded, most likely due to a lack of good records. More recent years should be considered more complete.
+
+
+## Data Processing
+
+######Load the necessary packages
+######Pull down a fresh dataset if it doesn't already exist in your working directory
+######Load the data & process for plots and information
+
+```{r, echo=TRUE, cache=TRUE, fig.height=7}
+
+##  Load the necessary packages:
+        if(!require(sqldf)){install.packages("sqldf")}
+        library(sqldf)
+        if(!require(ggplot2)){install.packages("ggplot2")}
+        library(ggplot2)
+        if(!require(gridExtra)){install.packages("gridExtra")}
+        library(gridExtra)
+        if(!require(tidyr)){install.packages("tidyr")}
+        if(!require(dplyr)){install.packages("dplyr")}
+        library(dplyr)
+        library(tidyr)
+        if(!require(tcltk)){install.packages("tcltk")}
+        library(tcltk)
+       
+
+##  Pull down the dataset into the working directory
+        dataset_url <-"http://d396qusza40orc.cloudfront.net/repdata%2Fdata%2FStormData.csv.bz2"
+        download.file(dataset_url, destfile="StormData.csv")
+        if(!file.exists("StormData.csv.bz2")){download.file(dataset_url, destfile="StormData.csv.bz2")}
+        storm <- read.csv("StormData.csv.bz2", header = TRUE, sep = ",", strip.white = TRUE)
+  
+##  Create the timestamp of the data download and publish
+        dateDownloaded <- date()
+        cat("Data file downloaded & evaluated ", dateDownloaded," from ", dataset_url)
+
+##  Subset the data to reduce the processing load.
+        SubsetData <- sqldf("
+                        select  *
+                        from (
+                                SELECT 
+                                        EVTYPE as EventType 
+                                        ,sum(FATALITIES) as Fatalities
+                                        ,sum(INJURIES) as Injuries 
+                                        ,sum(FATALITIES)+sum(INJURIES) as Injured_n_Dead
+                                        ,sum(PROPDMG) as PropertyDamage
+                                        ,sum(CROPDMG) as CropDamage 
+                                        ,sum(PROPDMG)+sum(CROPDMG) as EconomicDamage
+                                FROM storm 
+                                GROUP BY EVTYPE)
+                           where Injured_n_Dead > 0 or EconomicDamage > 0 ")
+  
+##  Table summarizing overall Deaths, Injuries, and Damage
+
+        tots<-as.data.frame(cbind(
+                     FA=sum(SubsetData$Fatalities)
+                    ,I=sum(SubsetData$Injuries)
+                    ,InD=sum(SubsetData$Injured_n_Dead)
+                    ,PD=sum(SubsetData$PropertyDamage)
+                    ,CD=sum(SubsetData$CropDamage)
+                    ,ED=sum(SubsetData$EconomicDamage)
+        ))
+
+```
+
+Processing will consist of creating several file data frames as well as temporary data frames.  The overall data will be subsetted out so that only those Events which had
+either an economic impact or a population health impact will be reviewed.  Those categories resulted in 488 observations of 7 variables, a reduction from the original data of 902,297 observations of 37 variables.
+
+Two new variables are introduced in processing the data for summarization.  Population Health is now defined as the sum of the original categories of "Fatalities" and "Injuries".  Economic Consequences will be measured by the new variable called "Economic Damage" created by summing the original categories of "Property Damage" and "Crop Damage".
+
+In the process of analysis the Top 5 values were chosen because of the significance of the overall quantities / loads these Event Types had on the overall measures to population health and economic consequence.  These impacts were not uniform across all the individual categories, but null values are allowed to report in the plot to show the change in distribution.  Therefore the plots did not remove those Event Types which had no impact in an individual category which summarized to the overall Affected value.
+
+Analysis will be added which shows the effect the Top 5 had in the overall calculation of Affected.
+
+
+```{r, echo=TRUE, cache=TRUE}
+
+# Data work to solve for the questions
+
+##  Tidying data for Question 1 & setting up plot.  
+###  The data will be reordered by category type for ranking.  Then it will be 
+##  appended to the overall file made for plotting the results.
+
+
+        popsort <- sqldf("select EventType, Injured_n_Dead from SubsetData order by Injured_n_Dead desc, EventType")
+        Top5.ppl<-as.data.frame(c(popsort[1:5,],"Injured_n_Dead"))
+        names(Top5.ppl)<-c("EventType","Affected","Factor")
+
+##  This interim table is used to save overall results for future chunk
+## calculations of the percentages represented by the Top N values.
+        save.ppl<-Top5.ppl
+ 
+        popsort <- sqldf("select EventType, Fatalities from SubsetData order by Fatalities desc, EventType")
+        top.5<-as.data.frame(c(popsort[1:5,],"Fatalities")) 
+        names(top.5)<-c("EventType","Affected","Factor")
+        Top5.ppl<-rbind(Top5.ppl, top.5)
+                
+        popsort <- sqldf("select EventType, Injuries from SubsetData order by Injuries desc, EventType")
+        top.5<-as.data.frame(c(popsort[1:5,],"Injuries")) 
+        names(top.5)<-c("EventType","Affected","Factor")
+        Top5.ppl<-rbind(Top5.ppl, top.5)
+  
+        plot1<-ggplot(Top5.ppl, aes(EventType, Affected)) + 
+                geom_bar(stat="identity", width=1)  + 
+                facet_grid(. ~ Factor) +
+                theme(axis.text.x = element_text(angle = 90, hjust = 1)) +
+                aes(fill = factor(EventType))+
+                labs(fill = "Event Types")
+
+## Data work for Question #2 - duplicate of Question #1 work except for
+## different subsetting rules.
+
+        popsort <- sqldf("select EventType, EconomicDamage from SubsetData order by EconomicDamage desc, EventType")
+        Top5.econ<-as.data.frame(c(popsort[1:5,], "EconomicDamage"))
+        names(Top5.econ)<-c("EventType","Affected","Factor")
+        save.econ<-Top5.econ
+
+         
+        popsort <- sqldf("select EventType, PropertyDamage from SubsetData order by PropertyDamage desc, EventType")
+        top.5<-as.data.frame(c(popsort[1:5,],"PropertyDamage")) 
+        names(top.5)<-c("EventType","Affected","Factor")
+        Top5.econ<-rbind(Top5.econ, top.5)
+        
+        popsort <- sqldf("select EventType, CropDamage from SubsetData order by CropDamage desc, EventType")
+        top.5<-as.data.frame(c(popsort[1:5,],"CropDamage")) 
+        names(top.5)<-c("EventType","Affected","Factor")
+        Top5.econ<-rbind(Top5.econ, top.5)
+        
+        plot2<-ggplot(Top5.econ, aes(EventType, Affected/1000000)) + 
+                geom_bar(stat="identity", width=1)  + 
+                facet_grid(. ~ Factor) +
+                theme(axis.text.x = element_text(angle = 90, hjust = 1)) +
+                aes(fill = factor(EventType))+
+                labs(fill = "Event Types", y = "Affected - in Millions of Dollars", x = "Event Type")
+
+```
+## RESULTS
+
+####  Question 1
+###### Across the United States, which types of events are most harmful with respect to population health?
+Two categories have been identified as affecting "population health".  These are the catagories of Fatalities and Injuries.  
+
+```{r, echo=TRUE, cache=TRUE}
+
+## create code to output the percentages of the defined Top N values for reporting
+
+        cat(c("The Top 5 Events for Fatalities and Injuries represents",
+              round(100*(sum(save.ppl$Affected)/tots$InD), digits = 1),
+              "percent of all Fatalities and Injuries.  Injuries 
+represent ",round(100*(tots$I/tots$InD), digits = 1),"percent of the combined Fatalities and Injuries total.  While Fatalities remainder with",round(100*(tots$FA/tots$InD), digits = 1),"percent of the combined."))
+
+````
+The results of looking at the Top 5 events for each category resulted in 7 types of events which had impacts.  Injuries, by far, outweighed fatalitites, however Tornadoes were the single event which was the top event in both Injuries & Fatalities.  
+
+```{r, echo=TRUE, cache=TRUE}
+## plot the output of the Top N values
+
+        print(plot1)
+               
+```
+
+####  Question 2
+###### Across the United States, which types of events have the greatest economic consequences?
+
+Two types of Damage are analyzed for the overall definition of "economic consequences".  These are the categories of Property Damage and Crop Damage.  
+
+```{r, echo=TRUE, cache=TRUE}
+
+## create code to output the percentages of the defined Top N values for reporting
+
+        cat(c("The Top 5 Events for Economic Damages represents",
+              round(100*(sum(save.econ$Affected)/tots$ED), digits = 1),
+              "percent of all Property and Crop Damages.  Property 
+Damages represent ",round(100*(tots$PD/tots$ED), digits = 1),"percent of the combined Damage total.  While Crop Damages remainder with",round(100*(tots$CD/tots$ED), digits = 1),"
+percent of the combined."))
+
+```
+
+The results of looking at the Top 5 events for each category resulted in 7 types of events which had the most significant impact.  This time, while Tornadoes had the highest contribution to the Property Damage and Property Damage drove the greatest amount of overall Economic Damage, it was the Event Type of Hail which drove the most significant economic impacts to the category of Crop Damage.
+
+```{r, echo=TRUE, cache=TRUE}
+## plot the output of the Top N values
+        print(plot2)
+               
+```
